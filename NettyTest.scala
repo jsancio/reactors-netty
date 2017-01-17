@@ -24,12 +24,16 @@ import io.netty.handler.logging.LogLevel
 import io.netty.handler.logging.LoggingHandler
 import io.netty.util.ReferenceCounted
 import io.reactors.Channel
+import io.reactors.Events
 import io.reactors.Proto
 import io.reactors.Reactor
 import io.reactors.ReactorSystem
+import io.reactors.Subscription
 import java.io.InputStream
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
 import java.util.concurrent.locks.ReentrantLock
 import org.slf4j.LoggerFactory
 import scala.collection.immutable.Queue
@@ -75,20 +79,16 @@ final class ReactorTest extends Reactor[ChannelMessage] {
       logger.info(s"reactor($uid) - channel active")
       val reply = system.channels.daemon.open[HttpObject]
       context.pipeline().fireUserEventTriggered(ReadChannel(reply.channel))
-      reply.events.onEvent {
+      reply.events.onMatch {
         case request: HttpRequest =>
+          implicit val executor = ExecutionContext.global
           logger.info(s"reactor($uid) - got a htttp request message: $request")
-        case lastContent: LastHttpContent =>
-          logger.info(s"reactor($uid) - got a last http content message: $lastContent")
-          context.writeAndFlush(NettyTestHandler.createResponse())
 
-          // TODO: Release now because we have nothing to do
-          lastContent.release
-        case content: HttpContent =>
-          logger.info(s"reactor($uid) - got a http content message: $content")
-
-          // TODO: Release now because we have nothing to do
-          content.release
+          for {
+            path <- NettyTestHandler.copyInputStream(new DynamicInputStream(reply.events))
+          } {
+            context.writeAndFlush(NettyTestHandler.createResponse())
+          }
       }
 
     case InactiveChannelMessage =>
@@ -168,76 +168,6 @@ final class NettyTestHandler(
         buffer = buffer.enqueue(message)
     }
   }
-
-  /*
-    message match {
-      case request: HttpRequest =>
-
-      case lastContent: LastHttpContent =>
-
-        pending = pending match {
-          case result @ Some(inputStream) =>
-            inputStream.add(lastContent.content, true)
-            result
-
-          case None =>
-            val inputStream = new DynamicInputStream(lastContent.content, true)
-
-            Future(
-              NettyTestHandler.copyInputStream(inputStream)
-            ).foreach { _ =>
-              val response = new DefaultFullHttpResponse(
-                HttpVersion.HTTP_1_1,
-                HttpResponseStatus.OK,
-                Unpooled.wrappedBuffer(NettyTestHandler.Content)
-              )
-              response.headers().set(HttpHeaderNames.CONTENT_TYPE, HttpHeaderValues.TEXT_PLAIN)
-              response.headers().setInt(
-                HttpHeaderNames.CONTENT_LENGTH,
-                response.content().readableBytes()
-              )
-
-              context.channel.writeAndFlush(response)
-              // TODO: we need to remove the pending object
-            }
-
-            Some(inputStream)
-        }
-
-      case content: HttpContent =>
-        content.retain
-        pending = pending match {
-          case result @ Some(inputStream) =>
-            inputStream.add(content.content, false)
-            result
-
-          case None =>
-            val inputStream = new DynamicInputStream(content.content, false)
-
-            // TODO: code duplication. remove
-            Future(
-              NettyTestHandler.copyInputStream(inputStream)
-            ).foreach { _ =>
-              val response = new DefaultFullHttpResponse(
-                HttpVersion.HTTP_1_1,
-                HttpResponseStatus.OK,
-                Unpooled.wrappedBuffer(NettyTestHandler.Content)
-              )
-              response.headers().set(HttpHeaderNames.CONTENT_TYPE, HttpHeaderValues.TEXT_PLAIN)
-              response.headers().setInt(
-                HttpHeaderNames.CONTENT_LENGTH,
-                response.content().readableBytes()
-              )
-
-              context.channel.writeAndFlush(response)
-              // TODO: we need to remove the pending object
-            }
-
-            Some(inputStream)
-        }
-    }
-  }
-*/
 }
 
 object NettyTestHandler {
@@ -267,28 +197,79 @@ object NettyTestHandler {
     response
   }
 
-  private def copyInputStream(input: InputStream): Unit = {
-    try {
-      logger.info("copying bytes...")
-      Files.copy(input, Paths.get("/tmp/hello-world-netty"))
-      logger.info("we copied and didn't throw")
-    } catch {
-      case NonFatal(e) =>
-        logger.error("why an exception", e)
-    } finally {
-      logger.info("done with copy")
+  def copyInputStream(input: InputStream): Future[Path] = {
+    implicit val executor = ExecutionContext.global
+
+    Future {
+      try {
+        logger.info("copying bytes...")
+        val path = Files.createTempFile("reactors", "test")
+        Files.copy(input, path, StandardCopyOption.REPLACE_EXISTING)
+        logger.info("we copied and didn't throw")
+        path
+      } catch {
+        case NonFatal(e) =>
+          logger.error("why an exception", e)
+          throw e
+      } finally {
+        logger.info("done with copy")
+      }
+    }
+  }
+
+  def readInputStream(inputStream: InputStream, channel: Channel[Byte]): Future[Long] = {
+    implicit val executor = ExecutionContext.global
+
+    Future {
+      var size = 0L
+      var read = 0
+      do {
+        var read = inputStream.read()
+        if (read != -1) {
+          size += 1
+          channel ! read.asInstanceOf[Byte]
+        }
+      } while (read != 1)
+
+      size
     }
   }
 }
 
-final class DynamicInputStream(data: ByteBuf, done: Boolean) extends InputStream {
+final class DynamicInputStream(events: Events[HttpObject]) extends InputStream {
+  private[this] val logger = LoggerFactory.getLogger(getClass())
+
   private[this] val lock = new ReentrantLock()
   private[this] val notEmpty = lock.newCondition()
 
-  private[this] var buffer = Vector(data)
-  private[this] var isDone = done
+  private[this] var buffer = Vector.empty[ByteBuf]
+  private[this] var isDone = false
+
+  // TODO: Deal with done
+  private[this] val subcription: Subscription = events.onMatch {
+    case data: HttpContent =>
+      logger.info(s"reactor - got a http content message: $data")
+
+      lock.lock()
+      try {
+        isDone = data.isInstanceOf[LastHttpContent]
+
+        // We got the last content don't send any new events.
+        if (isDone) {
+          logger.info("reactor - closing subcription")
+          subcription.unsubscribe
+        }
+
+        // Record the buffer in our cache
+        buffer = buffer :+ data.content()
+        notEmpty.signal()
+      } finally {
+        lock.unlock()
+      }
+  }
 
   override def read(): Int = {
+    logger.info("any thread - read called")
     lock.lock()
     try {
       while (buffer.isEmpty && !isDone) {
@@ -312,16 +293,8 @@ final class DynamicInputStream(data: ByteBuf, done: Boolean) extends InputStream
     }
   }
 
-  def add(data: ByteBuf, done: Boolean): Unit = {
-    lock.lock()
-    try {
-      isDone = done
-      buffer = buffer :+ data
-      notEmpty.signal()
-    } finally {
-      lock.unlock()
-    }
+  override def close(): Unit = {
+    // TODO: implement close - it should release all the buffer, clear the buffer and disable add
+    logger.info("any thread - close called")
   }
-
-  // TODO: implement close - it should release all the buffer, clear the buffer and disable add
 }
