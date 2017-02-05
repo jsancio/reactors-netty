@@ -7,7 +7,10 @@ lazy val root = (
   libraryDependencies ++= Seq(
     "io.netty" % "netty-codec-http" % "4.1.6.Final",
     "io.netty" % "netty-handler" % "4.1.6.Final",
-    "io.reactors" %% "reactors" % "0.8",
+    "io.monix" %% "monix" % "2.2.1",
     "ch.qos.logback" % "logback-classic" % "1.1.8"
+  ),
+  scalacOptions ++= Seq(
+    "-deprecation"
   )
 )
