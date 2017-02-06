@@ -11,6 +11,8 @@ lazy val root = (
     "ch.qos.logback" % "logback-classic" % "1.1.8"
   ),
   scalacOptions ++= Seq(
+    "-Xfatal-warnings",
+    "-Ywarn-unused-import",
     "-deprecation"
   )
 )
