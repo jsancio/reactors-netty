@@ -4,7 +4,8 @@ import io.netty.channel.socket.nio.NioServerSocketChannel
 import io.netty.handler.codec.http.HttpMethod
 import io.netty.handler.logging.LogLevel
 import io.netty.handler.logging.LoggingHandler
-import monix.execution.Scheduler
+import java.nio.file.Paths
+import monix.reactive.Observable
 
 
 object NettyTest {
@@ -16,7 +17,7 @@ object NettyTest {
         .group(eventLoopGroup)
         .channel(classOf[NioServerSocketChannel])
         .handler(new LoggingHandler(LogLevel.INFO))
-        .childHandler(NettyTestInitializer(ReactiveHandler(routes)(Scheduler.Implicits.global)))
+        .childHandler(NettyTestInitializer(ReactiveHandler(routes)))
 
       bootstrap.bind(8080).sync().channel().closeFuture().sync()
     } finally {
@@ -26,9 +27,28 @@ object NettyTest {
 
   private[this] val routes = List(
     Resource(
-      _ == "/echo"
+      _ == "/echo",
       {
         case HttpMethod.POST => Resource.echo
+      }
+    ),
+    Resource(
+      _ == "/big",
+      {
+        case HttpMethod.GET =>
+          in => Observable.fromTask(Resource.consume(in).map(_ => Resource.big)).flatten
+      }
+    ),
+    Resource(
+      _ == "/file",
+      {
+        case HttpMethod.GET =>
+          in =>
+            Observable.fromTask(
+              Resource.consume(in).map(
+                _ => NettyTestHandler.createResponseFromPath(Paths.get("/home/jose/big_file"))
+              )
+            ).flatten
       }
     )
   )

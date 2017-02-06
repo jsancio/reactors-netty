@@ -1,7 +1,6 @@
 import io.netty.buffer.Unpooled
 import io.netty.channel.ChannelHandlerContext
 import io.netty.channel.SimpleChannelInboundHandler
-import io.netty.handler.codec.http.DefaultFullHttpResponse
 import io.netty.handler.codec.http.DefaultHttpContent
 import io.netty.handler.codec.http.DefaultHttpHeaders
 import io.netty.handler.codec.http.DefaultHttpResponse
@@ -26,6 +25,7 @@ import monix.reactive.subjects.ConcurrentSubject
 import org.slf4j.LoggerFactory
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
+import scala.concurrent.Promise
 import scala.util.control.NonFatal
 
 
@@ -36,18 +36,21 @@ final class NettyTestHandler(
 ) extends SimpleChannelInboundHandler[HttpObject] {
   private[this] val logger = LoggerFactory.getLogger(getClass())
   private[this] val observerKey = AttributeKey.valueOf[Observer[HttpObject]](getClass, "observer")
-
-  override def channelActive(context: ChannelHandlerContext): Unit = {
-    logger.info("handler - channel active")
-  }
+  private[this] val writableKey = AttributeKey.valueOf[Promise[Ack]](getClass, "writable")
 
   override def channelInactive(context: ChannelHandlerContext): Unit = {
-    logger.info("handler - channel inactive")
-    // TODO: push on error
+    // TODO: Send error to observer if it exists
+  }
+
+  override def channelWritabilityChanged(context: ChannelHandlerContext): Unit = {
+    if (context.channel.isWritable) {
+      for (promise <- Option(context.channel.attr(writableKey).getAndSet(null))) {
+        promise.success(Ack.Continue)
+      }
+    }
   }
 
   override def channelRead0(context: ChannelHandlerContext, message: HttpObject): Unit = {
-    logger.info("handler - channel read")
     // Retain a reference before sending or returning message
     message match {
       case content: ReferenceCounted =>
@@ -58,28 +61,30 @@ final class NettyTestHandler(
     message match {
       case request: HttpRequest =>
         val subject = ConcurrentSubject.publishToOne[HttpObject]
-        val old = context.channel.attr(observerKey).setIfAbsent(subject)
 
-        if (old != subject) {
-          // TODO: handler if the return value doesn't equal subject
+        for (old <- Option(context.channel.attr(observerKey).setIfAbsent(subject))) {
+          if (old != subject) {
+            logger.warn("Client sent a request while we had one pending.")
+            context.close()
+            // TODO: old.onError(...)
+          }
         }
 
-        // TODO: handler cancelable
-        // TODO: handle all of the events
-        handler(request)(subject).subscribe { reply =>
-          context.writeAndFlush(reply)
-          Ack.Continue
-        }
-
+        // TODO: handle cancelable
+        handler(request)(subject).subscribe(
+          NettyBridgeObserver[HttpObject](context, observerKey, writableKey)
+        )
         subject.onNext(request)
+
       case lastContent: LastHttpContent =>
-        // TODOL What should we do if we don't have an observer?
+        // TODO: What should we do if we don't have an observer?
         for (observer <- Option(context.channel.attr(observerKey).get)) {
           observer.onNext(lastContent)
           observer.onComplete()
         }
+
       case content: HttpObject =>
-        // TODOL What should we do if we don't have an observer?
+        // TODO: What should we do if we don't have an observer?
         for (observer <- Option(context.channel.attr(observerKey).get)) {
           observer.onNext(content)
         }
@@ -88,7 +93,6 @@ final class NettyTestHandler(
 }
 
 object NettyTestHandler {
-  private val Content = Array[Byte]('H', 'e', 'l', 'l', 'o', ' ', 'W', 'o', 'r', 'l', 'd')
   private[this] val logger = LoggerFactory.getLogger(getClass())
 
   def apply(
@@ -97,21 +101,6 @@ object NettyTestHandler {
     implicit scheduler: Scheduler
   ): NettyTestHandler = {
     new NettyTestHandler(handler)
-  }
-
-  def createResponse: DefaultFullHttpResponse = {
-    val response = new DefaultFullHttpResponse(
-      HttpVersion.HTTP_1_1,
-      HttpResponseStatus.OK,
-      Unpooled.wrappedBuffer(Content)
-    )
-    response.headers().set(HttpHeaderNames.CONTENT_TYPE, HttpHeaderValues.TEXT_PLAIN)
-    response.headers().setInt(
-      HttpHeaderNames.CONTENT_LENGTH,
-      response.content().readableBytes()
-    )
-
-    response
   }
 
   def createResponseFromPath(path: Path): Observable[HttpObject] = {
