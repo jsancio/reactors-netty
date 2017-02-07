@@ -5,7 +5,6 @@ import io.netty.handler.codec.http.HttpMethod
 import io.netty.handler.logging.LogLevel
 import io.netty.handler.logging.LoggingHandler
 import java.nio.file.Paths
-import monix.reactive.Observable
 
 
 object NettyTest {
@@ -36,7 +35,7 @@ object NettyTest {
       _ == "/big",
       {
         case HttpMethod.GET =>
-          in => Observable.fromTask(Resource.consume(in).map(_ => Resource.big)).flatten
+          in => Resource.consume(in).flatMap(_ => Resource.big)
       }
     ),
     Resource(
@@ -44,11 +43,9 @@ object NettyTest {
       {
         case HttpMethod.GET =>
           in =>
-            Observable.fromTask(
-              Resource.consume(in).map(
-                _ => NettyTestHandler.createResponseFromPath(Paths.get("/home/jose/big_file"))
-              )
-            ).flatten
+            Resource.consume(in).map(
+              _ => NettyTestHandler.createResponseFromPath(Paths.get("/home/jose/big_file"))
+            )
       }
     )
   )

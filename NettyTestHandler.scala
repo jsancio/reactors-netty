@@ -8,6 +8,7 @@ import io.netty.handler.codec.http.HttpHeaderNames
 import io.netty.handler.codec.http.HttpHeaderValues
 import io.netty.handler.codec.http.HttpObject
 import io.netty.handler.codec.http.HttpRequest
+import io.netty.handler.codec.http.HttpResponse
 import io.netty.handler.codec.http.HttpResponseStatus
 import io.netty.handler.codec.http.HttpVersion
 import io.netty.handler.codec.http.LastHttpContent
@@ -27,6 +28,8 @@ import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.Promise
 import scala.util.control.NonFatal
+import scala.util.Success
+import scala.util.Failure
 
 
 final class NettyTestHandler(
@@ -71,9 +74,16 @@ final class NettyTestHandler(
         }
 
         // TODO: handle cancelable
-        handler(request)(subject).subscribe(
-          NettyBridgeObserver[HttpObject](context, observerKey, writableKey)
-        )
+        handler(request)(subject).runOnComplete {
+          case Success((response, body)) =>
+            context.write(response)
+            body.subscribe(NettyBridgeObserver[HttpObject](context, observerKey, writableKey))
+
+          case Failure(error) =>
+            // TODO: we should return a 500
+            logger.error("Got an unhandle exception from the reactive handler", error)
+            context.close()
+        }
         subject.onNext(request)
 
       case lastContent: LastHttpContent =>
@@ -103,33 +113,33 @@ object NettyTestHandler {
     new NettyTestHandler(handler)
   }
 
-  def createResponseFromPath(path: Path): Observable[HttpObject] = {
-    Observable.defer {
-      val response = {
-        val headers = new DefaultHttpHeaders()
-        headers.set(HttpHeaderNames.CONTENT_TYPE, HttpHeaderValues.TEXT_PLAIN)
-        headers.setInt(
-          HttpHeaderNames.CONTENT_LENGTH,
-          path.toFile.length().toInt
-        )
+  def createResponseFromPath(path: Path): (HttpResponse, Observable[HttpObject]) = {
+    val response = {
+      val headers = new DefaultHttpHeaders()
+      headers.set(HttpHeaderNames.CONTENT_TYPE, HttpHeaderValues.TEXT_PLAIN)
+      headers.setInt(
+        HttpHeaderNames.CONTENT_LENGTH,
+        path.toFile.length().toInt
+      )
 
-        Observable.now(
-          new DefaultHttpResponse(
-            HttpVersion.HTTP_1_1,
-            HttpResponseStatus.OK,
-            headers
-          )
-        )
-      }
+      new DefaultHttpResponse(
+        HttpVersion.HTTP_1_1,
+        HttpResponseStatus.OK,
+        headers
+      )
+    }
 
+    val body = Observable.defer {
       val body = Observable.fromInputStream(Files.newInputStream(path)).map { bytes =>
         new DefaultHttpContent(Unpooled.wrappedBuffer(bytes))
       }
 
       val lastBody = Observable.now(LastHttpContent.EMPTY_LAST_CONTENT)
 
-      response ++ body ++ lastBody
+      body ++ lastBody
     }
+
+    (response, body)
   }
 
   def copyInputStream(input: InputStream): Future[Path] = {
