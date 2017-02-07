@@ -75,7 +75,7 @@ object Resource {
     import Scheduler.Implicits.global
 
     Task.fromFuture(NettyTestHandler.copyInputStream(new DynamicInputStream(in))).map(
-      NettyTestHandler.createResponseFromPath
+      NettyTestHandler.createInputStreamResponseFromPath
     )
   }
 

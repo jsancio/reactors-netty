@@ -1,5 +1,6 @@
 import io.netty.buffer.Unpooled
 import io.netty.channel.ChannelHandlerContext
+import io.netty.channel.DefaultFileRegion
 import io.netty.channel.SimpleChannelInboundHandler
 import io.netty.handler.codec.http.DefaultHttpHeaders
 import io.netty.handler.codec.http.DefaultHttpResponse
@@ -26,9 +27,9 @@ import org.slf4j.LoggerFactory
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.Promise
-import scala.util.control.NonFatal
-import scala.util.Success
 import scala.util.Failure
+import scala.util.Success
+import scala.util.control.NonFatal
 
 
 final class NettyTestHandler(
@@ -112,7 +113,7 @@ object NettyTestHandler {
     new NettyTestHandler(handler)
   }
 
-  def createResponseFromPath(path: Path): (HttpResponse, Observable[Content]) = {
+  def createInputStreamResponseFromPath(path: Path): (HttpResponse, Observable[Content]) = {
     val response = {
       val headers = new DefaultHttpHeaders()
       headers.set(HttpHeaderNames.CONTENT_TYPE, HttpHeaderValues.TEXT_PLAIN)
@@ -131,6 +132,35 @@ object NettyTestHandler {
     val body = Observable.defer {
       val body = Observable.fromInputStream(Files.newInputStream(path)).map { bytes =>
         Buffer(Unpooled.wrappedBuffer(bytes))
+      }
+
+      val lastBody = Observable.now(Http(LastHttpContent.EMPTY_LAST_CONTENT))
+
+      body ++ lastBody
+    }
+
+    (response, body)
+  }
+
+  def createResponseFromPath(path: Path): (HttpResponse, Observable[Content]) = {
+    val response = {
+      val headers = new DefaultHttpHeaders()
+      headers.set(HttpHeaderNames.CONTENT_TYPE, HttpHeaderValues.TEXT_PLAIN)
+      headers.setInt(
+        HttpHeaderNames.CONTENT_LENGTH,
+        path.toFile.length().toInt
+      )
+
+      new DefaultHttpResponse(
+        HttpVersion.HTTP_1_1,
+        HttpResponseStatus.OK,
+        headers
+      )
+    }
+
+    val body = {
+      val body = Observable.eval {
+        Region(new DefaultFileRegion(path.toFile, 0, path.toFile.length()))
       }
 
       val lastBody = Observable.now(Http(LastHttpContent.EMPTY_LAST_CONTENT))
