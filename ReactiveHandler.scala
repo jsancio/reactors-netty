@@ -1,9 +1,11 @@
+import io.netty.buffer.ByteBuf
 import io.netty.buffer.Unpooled
+import io.netty.channel.FileRegion
 import io.netty.handler.codec.http.DefaultFullHttpResponse
-import io.netty.handler.codec.http.DefaultHttpContent
 import io.netty.handler.codec.http.DefaultHttpHeaders
 import io.netty.handler.codec.http.DefaultHttpResponse
 import io.netty.handler.codec.http.EmptyHttpHeaders
+import io.netty.handler.codec.http.HttpContent
 import io.netty.handler.codec.http.HttpHeaderNames
 import io.netty.handler.codec.http.HttpHeaderValues
 import io.netty.handler.codec.http.HttpMethod
@@ -19,12 +21,19 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 
+trait Content {
+  def content: Object
+}
+final case class Http(val content: HttpContent) extends Content
+final case class Buffer(val content: ByteBuf) extends Content
+final case class Region(val content: FileRegion) extends Content
+
 final class ReactiveHandler private(
   resources: List[Resource]
-) extends Function1[HttpRequest, Observable[HttpObject] => Task[(HttpResponse, Observable[HttpObject])]] {
+) extends Function1[HttpRequest, Observable[HttpObject] => Task[(HttpResponse, Observable[Content])]] {
   override def apply(
     request: HttpRequest
-  ): Observable[HttpObject] => Task[(HttpResponse, Observable[HttpObject])] = {
+  ): Observable[HttpObject] => Task[(HttpResponse, Observable[Content])] = {
     resources.find(resource => resource.pathMatch(request.uri)) match {
       case Some(resource) =>
         resource.handler.applyOrElse(
@@ -58,11 +67,11 @@ object ReactiveHandler {
 
 case class Resource(
   pathMatch: String => Boolean,
-  handler: PartialFunction[HttpMethod, Observable[HttpObject] => Task[(HttpResponse, Observable[HttpObject])]]
+  handler: PartialFunction[HttpMethod, Observable[HttpObject] => Task[(HttpResponse, Observable[Content])]]
 )
 
 object Resource {
-  def echo(in: Observable[HttpObject]): Task[(HttpResponse, Observable[HttpObject])] = {
+  def echo(in: Observable[HttpObject]): Task[(HttpResponse, Observable[Content])] = {
     import Scheduler.Implicits.global
 
     Task.fromFuture(NettyTestHandler.copyInputStream(new DynamicInputStream(in))).map(
@@ -70,13 +79,11 @@ object Resource {
     )
   }
 
-  val big: Task[(HttpResponse, Observable[HttpObject])] = Task {
+  val big: Task[(HttpResponse, Observable[Content])] = Task {
     val frames = 500000
     val size = 4096
-    val buffer = new DefaultHttpContent(
-      Unpooled.unreleasableBuffer(
-        Unpooled.wrappedBuffer(Array.fill(size)('a'.toByte))
-      )
+    val buffer = Unpooled.unreleasableBuffer(
+      Unpooled.wrappedBuffer(Array.fill(size)('a'.toByte))
     )
 
     val response = {
@@ -94,9 +101,9 @@ object Resource {
       )
     }
 
-    val body = Observable.range(0, frames).map(_ => buffer)
+    val body = Observable.range(0, frames).map(_ => Buffer(buffer))
 
-    val lastBody = Observable.now(LastHttpContent.EMPTY_LAST_CONTENT)
+    val lastBody = Observable.now(Http(LastHttpContent.EMPTY_LAST_CONTENT))
 
     (response, body ++ lastBody)
   }

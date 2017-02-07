@@ -7,7 +7,7 @@ import org.slf4j.LoggerFactory
 import scala.concurrent.Future
 import scala.concurrent.Promise
 
-final class NettyBridgeObserver[T] private (
+final class NettyBridgeObserver[T <: Content] private (
   context: ChannelHandlerContext,
   observerKey: AttributeKey[Observer[HttpObject]],
   writableKey: AttributeKey[Promise[Ack]]
@@ -16,7 +16,7 @@ final class NettyBridgeObserver[T] private (
 
   // TODO: implement this using a future based on the writtability
   override def onNext(elem: T): Future[Ack] = {
-    context.write(elem, context.voidPromise)
+    context.write(elem.content, context.voidPromise)
 
     if (!context.channel.isWritable) {
       val promise = Promise[Ack]()
@@ -43,7 +43,7 @@ final class NettyBridgeObserver[T] private (
 }
 
 object NettyBridgeObserver {
-  def apply[T](
+  def apply[T <: Content](
     context: ChannelHandlerContext,
     observerKey: AttributeKey[Observer[HttpObject]],
     writableKey: AttributeKey[Promise[Ack]]
