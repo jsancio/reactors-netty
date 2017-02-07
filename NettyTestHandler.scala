@@ -1,7 +1,6 @@
 import io.netty.buffer.Unpooled
 import io.netty.channel.ChannelHandlerContext
 import io.netty.channel.SimpleChannelInboundHandler
-import io.netty.handler.codec.http.DefaultHttpContent
 import io.netty.handler.codec.http.DefaultHttpHeaders
 import io.netty.handler.codec.http.DefaultHttpResponse
 import io.netty.handler.codec.http.HttpHeaderNames
@@ -77,7 +76,7 @@ final class NettyTestHandler(
         handler(request)(subject).runOnComplete {
           case Success((response, body)) =>
             context.write(response)
-            body.subscribe(NettyBridgeObserver[HttpObject](context, observerKey, writableKey))
+            body.subscribe(NettyBridgeObserver[Content](context, observerKey, writableKey))
 
           case Failure(error) =>
             // TODO: we should return a 500
@@ -113,7 +112,7 @@ object NettyTestHandler {
     new NettyTestHandler(handler)
   }
 
-  def createResponseFromPath(path: Path): (HttpResponse, Observable[HttpObject]) = {
+  def createResponseFromPath(path: Path): (HttpResponse, Observable[Content]) = {
     val response = {
       val headers = new DefaultHttpHeaders()
       headers.set(HttpHeaderNames.CONTENT_TYPE, HttpHeaderValues.TEXT_PLAIN)
@@ -131,10 +130,10 @@ object NettyTestHandler {
 
     val body = Observable.defer {
       val body = Observable.fromInputStream(Files.newInputStream(path)).map { bytes =>
-        new DefaultHttpContent(Unpooled.wrappedBuffer(bytes))
+        Buffer(Unpooled.wrappedBuffer(bytes))
       }
 
-      val lastBody = Observable.now(LastHttpContent.EMPTY_LAST_CONTENT)
+      val lastBody = Observable.now(Http(LastHttpContent.EMPTY_LAST_CONTENT))
 
       body ++ lastBody
     }
