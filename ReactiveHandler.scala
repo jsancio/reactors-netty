@@ -9,6 +9,7 @@ import io.netty.handler.codec.http.HttpHeaderValues
 import io.netty.handler.codec.http.HttpMethod
 import io.netty.handler.codec.http.HttpObject
 import io.netty.handler.codec.http.HttpRequest
+import io.netty.handler.codec.http.HttpResponse
 import io.netty.handler.codec.http.HttpResponseStatus
 import io.netty.handler.codec.http.HttpVersion
 import io.netty.handler.codec.http.LastHttpContent
@@ -20,27 +21,31 @@ import monix.reactive.Observable
 
 final class ReactiveHandler private(
   resources: List[Resource]
-) extends Function1[HttpRequest, (Observable[HttpObject] => Observable[HttpObject])] {
-  override def apply(request: HttpRequest): Observable[HttpObject] => Observable[HttpObject] = {
+) extends Function1[HttpRequest, Observable[HttpObject] => Task[(HttpResponse, Observable[HttpObject])]] {
+  override def apply(
+    request: HttpRequest
+  ): Observable[HttpObject] => Task[(HttpResponse, Observable[HttpObject])] = {
     resources.find(resource => resource.pathMatch(request.uri)) match {
       case Some(resource) =>
         resource.handler.applyOrElse(
           request.method,
           (_: HttpMethod) =>
             in =>
-              Observable.fromTask(
-                Resource.consume(in).map(
-                  _ => Resource.createEmptyResponse(HttpResponseStatus.METHOD_NOT_ALLOWED)
+              Resource.consume(in).map { _ =>
+                (
+                  Resource.createEmptyResponse(HttpResponseStatus.METHOD_NOT_ALLOWED),
+                  Observable.empty
                 )
-              )
+              }
         )
       case None =>
         in =>
-          Observable.fromTask(
-            Resource.consume(in).map(
-              _ => Resource.createEmptyResponse(HttpResponseStatus.NOT_FOUND)
+          Resource.consume(in).map { _ =>
+            (
+              Resource.createEmptyResponse(HttpResponseStatus.NOT_FOUND),
+              Observable.empty
             )
-          )
+          }
     }
   }
 }
@@ -53,21 +58,19 @@ object ReactiveHandler {
 
 case class Resource(
   pathMatch: String => Boolean,
-  handler: PartialFunction[HttpMethod, Observable[HttpObject] => Observable[HttpObject]]
+  handler: PartialFunction[HttpMethod, Observable[HttpObject] => Task[(HttpResponse, Observable[HttpObject])]]
 )
 
 object Resource {
-  def echo(in: Observable[HttpObject]): Observable[HttpObject] = {
+  def echo(in: Observable[HttpObject]): Task[(HttpResponse, Observable[HttpObject])] = {
     import Scheduler.Implicits.global
 
-    Observable.fromFuture(
-      NettyTestHandler.copyInputStream(new DynamicInputStream(in)).map(
-        NettyTestHandler.createResponseFromPath
-      )
-    ).flatten
+    Task.fromFuture(NettyTestHandler.copyInputStream(new DynamicInputStream(in))).map(
+      NettyTestHandler.createResponseFromPath
+    )
   }
 
-  val big: Observable[HttpObject] = {
+  val big: Task[(HttpResponse, Observable[HttpObject])] = Task {
     val frames = 500000
     val size = 4096
     val buffer = new DefaultHttpContent(
@@ -84,12 +87,10 @@ object Resource {
         size * frames
       )
 
-      Observable.now(
-        new DefaultHttpResponse(
-          HttpVersion.HTTP_1_1,
-          HttpResponseStatus.OK,
-          headers
-        )
+      new DefaultHttpResponse(
+        HttpVersion.HTTP_1_1,
+        HttpResponseStatus.OK,
+        headers
       )
     }
 
@@ -97,7 +98,7 @@ object Resource {
 
     val lastBody = Observable.now(LastHttpContent.EMPTY_LAST_CONTENT)
 
-    response ++ body ++ lastBody
+    (response, body ++ lastBody)
   }
 
   def consume(in: Observable[HttpObject]): Task[Unit] = {
