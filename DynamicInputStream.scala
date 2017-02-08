@@ -6,15 +6,14 @@ import java.io.InputStream
 import java.util.concurrent.locks.ReentrantLock
 import monix.execution.Ack
 import monix.execution.Scheduler
-import monix.reactive.Observable
+import monix.reactive.observers.Subscriber
 import org.slf4j.LoggerFactory
+import scala.concurrent.Future
 
 
 final class DynamicInputStream(
-  events: Observable[HttpObject]
-)(
-  implicit scheduler: Scheduler
-) extends InputStream {
+  implicit val scheduler: Scheduler
+) extends InputStream with Subscriber[HttpObject] {
   private[this] val logger = LoggerFactory.getLogger(getClass())
 
   private[this] val lock = new ReentrantLock()
@@ -23,7 +22,7 @@ final class DynamicInputStream(
   private[this] var buffer = Vector.empty[ByteBuf]
   private[this] var isDone = false
 
-  events.subscribe { event =>
+  override def onNext(event: HttpObject): Future[Ack] = {
     event match {
       case data: HttpContent =>
         logger.info(s"reactor - got a http content message: $data")
@@ -47,6 +46,15 @@ final class DynamicInputStream(
     }
 
     Ack.Continue
+  }
+
+  override def onComplete(): Unit = {
+    isDone = true
+  }
+
+  override def onError(error: Throwable): Unit = {
+    // TODO: No nothing for now. Just log the error.
+    logger.error("any thread - got an exception from the observable", error)
   }
 
   override def read(): Int = {
