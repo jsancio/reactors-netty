@@ -74,7 +74,10 @@ object Resource {
   def echo(in: Observable[HttpObject]): Task[(HttpResponse, Observable[Content])] = {
     import Scheduler.Implicits.global
 
-    Task.fromFuture(NettyTestHandler.copyInputStream(new DynamicInputStream(in))).map(
+    val inputStream = new DynamicInputStream()
+    in.subscribe(inputStream)
+
+    Task.fromFuture(NettyTestHandler.copyInputStream(inputStream)).map(
       NettyTestHandler.createInputStreamResponseFromPath
     )
   }
