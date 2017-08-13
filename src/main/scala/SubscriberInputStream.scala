@@ -11,7 +11,7 @@ import org.slf4j.LoggerFactory
 import scala.concurrent.Future
 
 
-final class DynamicInputStream(
+final class SubscriberInputStream(
   implicit val scheduler: Scheduler
 ) extends InputStream with Subscriber[HttpObject] {
   private[this] val logger = LoggerFactory.getLogger(getClass())

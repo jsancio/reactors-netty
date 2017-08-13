@@ -7,7 +7,7 @@ import org.slf4j.LoggerFactory
 import scala.concurrent.Future
 import scala.concurrent.Promise
 
-final class NettyBridgeObserver[T <: Content] private (
+final class BridgeObserver[T <: Content] private (
   context: ChannelHandlerContext,
   observerKey: AttributeKey[Observer[HttpObject]],
   writableKey: AttributeKey[Promise[Ack]]
@@ -42,12 +42,12 @@ final class NettyBridgeObserver[T <: Content] private (
   }
 }
 
-object NettyBridgeObserver {
+object BridgeObserver {
   def apply[T <: Content](
     context: ChannelHandlerContext,
     observerKey: AttributeKey[Observer[HttpObject]],
     writableKey: AttributeKey[Promise[Ack]]
-  ): NettyBridgeObserver[T] = {
-    new NettyBridgeObserver[T](context, observerKey, writableKey)
+  ): BridgeObserver[T] = {
+    new BridgeObserver[T](context, observerKey, writableKey)
   }
 }

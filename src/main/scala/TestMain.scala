@@ -6,8 +6,7 @@ import io.netty.handler.logging.LogLevel
 import io.netty.handler.logging.LoggingHandler
 import java.nio.file.Paths
 
-
-object NettyTest {
+object TestMain {
   def main(args: Array[String]): Unit = {
     val eventLoopGroup = new NioEventLoopGroup()
     try {
@@ -16,7 +15,7 @@ object NettyTest {
         .group(eventLoopGroup)
         .channel(classOf[NioServerSocketChannel])
         .handler(new LoggingHandler(LogLevel.INFO))
-        .childHandler(NettyTestInitializer(ReactiveHandler(routes)))
+        .childHandler(BridgeInitializer(HttpHandler(routes)))
 
       bootstrap.bind(8080).sync().channel().closeFuture().sync()
     } finally {
@@ -44,7 +43,7 @@ object NettyTest {
         case HttpMethod.GET =>
           in =>
             Resource.consume(in).map(
-              _ => NettyTestHandler.createResponseFromPath(Paths.get("/home/jose/big_file"))
+              _ => Resource.createResponseFromPath(Paths.get("/home/jose/big_file"))
             )
       }
     )
