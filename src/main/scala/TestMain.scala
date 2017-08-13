@@ -25,26 +25,28 @@ object TestMain {
 
   private[this] val routes = List(
     Resource(
-      _ == "/echo",
-      {
+      _ == "/echo", {
         case HttpMethod.POST => Resource.echo
       }
     ),
     Resource(
-      _ == "/big",
-      {
+      _ == "/big", {
         case HttpMethod.GET =>
-          in => Resource.consume(in).flatMap(_ => Resource.big)
+          in =>
+            Resource.consume(in).flatMap(_ => Resource.big)
       }
     ),
     Resource(
-      _ == "/file",
-      {
+      _ == "/file", {
         case HttpMethod.GET =>
           in =>
-            Resource.consume(in).map(
-              _ => Resource.createResponseFromPath(Paths.get("/home/jose/big_file"))
-            )
+            Resource
+              .consume(in)
+              .map(
+                _ =>
+                  Resource.createResponseFromPath(
+                    Paths.get("/home/jose/big_file"))
+              )
       }
     )
   )

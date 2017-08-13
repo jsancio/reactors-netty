@@ -10,10 +10,10 @@ import monix.reactive.observers.Subscriber
 import org.slf4j.LoggerFactory
 import scala.concurrent.Future
 
-
 final class SubscriberInputStream(
-  implicit val scheduler: Scheduler
-) extends InputStream with Subscriber[HttpObject] {
+    implicit val scheduler: Scheduler
+) extends InputStream
+    with Subscriber[HttpObject] {
   private[this] val logger = LoggerFactory.getLogger(getClass())
 
   private[this] val lock = new ReentrantLock()

@@ -5,7 +5,7 @@ import io.netty.handler.codec.http.HttpResponseEncoder
 import monix.execution.Scheduler
 
 final class BridgeInitializer(
-  handler: HttpHandler
+    handler: HttpHandler
 ) extends ChannelInitializer[SocketChannel] {
   override def initChannel(channel: SocketChannel): Unit = {
     val pipeline = channel.pipeline()

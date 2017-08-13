@@ -26,23 +26,27 @@ import scala.concurrent.Future
 import scala.util.control.NonFatal
 
 case class Resource(
-  pathMatch: String => Boolean,
-  handler: PartialFunction[HttpMethod, BodyHandler]
+    pathMatch: String => Boolean,
+    handler: PartialFunction[HttpMethod, BodyHandler]
 )
 
 // TODO: Clean this up
 object Resource {
   private[this] val logger = LoggerFactory.getLogger(getClass())
 
-  def echo(in: Observable[HttpObject]): Task[(HttpResponse, Observable[Content])] = {
+  def echo(
+    in: Observable[HttpObject]
+  ): Task[(HttpResponse, Observable[Content])] = {
     import Scheduler.Implicits.global
 
     val inputStream = new SubscriberInputStream()
     in.subscribe(inputStream)
 
-    Task.fromFuture(copyInputStream(inputStream)).map(
-      createInputStreamResponseFromPath
-    )
+    Task
+      .fromFuture(copyInputStream(inputStream))
+      .map(
+        createInputStreamResponseFromPath
+      )
   }
 
   val big: Task[(HttpResponse, Observable[Content])] = Task {
@@ -83,7 +87,9 @@ object Resource {
     }
   }
 
-  def createEmptyResponse(status: HttpResponseStatus): DefaultFullHttpResponse = {
+  def createEmptyResponse(
+      status: HttpResponseStatus
+  ): DefaultFullHttpResponse = {
     val headers = new DefaultHttpHeaders()
     headers.setInt(HttpHeaderNames.CONTENT_LENGTH, 0)
 
@@ -96,7 +102,9 @@ object Resource {
     )
   }
 
-  def createInputStreamResponseFromPath(path: Path): (HttpResponse, Observable[Content]) = {
+  def createInputStreamResponseFromPath(
+      path: Path
+  ): (HttpResponse, Observable[Content]) = {
     val response = {
       val headers = new DefaultHttpHeaders()
       headers.set(HttpHeaderNames.CONTENT_TYPE, HttpHeaderValues.TEXT_PLAIN)
@@ -113,8 +121,9 @@ object Resource {
     }
 
     val body = Observable.defer {
-      val body = Observable.fromInputStream(Files.newInputStream(path)).map { bytes =>
-        Buffer(Unpooled.wrappedBuffer(bytes))
+      val body = Observable.fromInputStream(Files.newInputStream(path)).map {
+        bytes =>
+          Buffer(Unpooled.wrappedBuffer(bytes))
       }
 
       val lastBody = Observable.now(Http(LastHttpContent.EMPTY_LAST_CONTENT))

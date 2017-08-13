@@ -8,9 +8,9 @@ import scala.concurrent.Future
 import scala.concurrent.Promise
 
 final class BridgeObserver[T <: Content] private (
-  context: ChannelHandlerContext,
-  observerKey: AttributeKey[Observer[HttpObject]],
-  writableKey: AttributeKey[Promise[Ack]]
+    context: ChannelHandlerContext,
+    observerKey: AttributeKey[Observer[HttpObject]],
+    writableKey: AttributeKey[Promise[Ack]]
 ) extends Observer[T] {
   private[this] val logger = LoggerFactory.getLogger(getClass())
 
@@ -44,9 +44,9 @@ final class BridgeObserver[T <: Content] private (
 
 object BridgeObserver {
   def apply[T <: Content](
-    context: ChannelHandlerContext,
-    observerKey: AttributeKey[Observer[HttpObject]],
-    writableKey: AttributeKey[Promise[Ack]]
+      context: ChannelHandlerContext,
+      observerKey: AttributeKey[Observer[HttpObject]],
+      writableKey: AttributeKey[Promise[Ack]]
   ): BridgeObserver[T] = {
     new BridgeObserver[T](context, observerKey, writableKey)
   }
